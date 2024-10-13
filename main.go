@@ -13,13 +13,20 @@ import (
 )
 
 type ImageData struct {
-	Images   []string
+	Image    string
+	Filename string
+}
+
+type PageData struct {
+	Images   []ImageData
 	Hostname string
 }
 
 func main() {
 	port := flag.String("port", "8080", "Número de puerto para el servidor web")
-	imgDir := flag.String("imgDir", "images", "Directorio que contiene las imágenes")
+	imgDir1 := flag.String("imgDir1", "images", "Primer directorio que contiene las imágenes")
+	imgDir2 := flag.String("imgDir2", "images2", "Segundo directorio que contiene las imágenes")
+	useDir1 := flag.Bool("useDir1", true, "Usar el primer directorio de imágenes")
 	flag.Parse()
 
 	hostname, err := os.Hostname()
@@ -27,8 +34,13 @@ func main() {
 		hostname = "desconocido"
 	}
 
+	imgDir := *imgDir1
+	if !*useDir1 {
+		imgDir = *imgDir2
+	}
+
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		images, err := getRandomImages(*imgDir, 4)
+		images, err := getRandomImages(imgDir, 4)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -89,7 +101,8 @@ func main() {
                 <div class="row">
                     {{range .Images}}
                     <div class="col-lg-6 col-md-6 mb-4">
-                        <img class="img-fluid" style="width: 400px; height: 400px;" src="data:image;base64,{{.}}" alt="Imagen" onclick="openModal(this.src)">
+                        <img class="img-fluid" style="width: 400px; height: 400px;" src="data:image;base64,{{.Image}}" alt="Imagen" onclick="openModal(this.src)">
+                        <p>{{.Filename}}</p>
                     </div>
                     {{end}}
                 </div>
@@ -117,48 +130,42 @@ func main() {
         </html>
         `))
 
-		tmpl.Execute(w, ImageData{Images: images, Hostname: hostname})
-	})
+		pageData := PageData{
+			Images:   images,
+			Hostname: hostname,
+		}
 
-	http.Handle("/images/", http.StripPrefix("/images/", http.FileServer(http.Dir(*imgDir))))
+		tmpl.Execute(w, pageData)
+	})
 
 	http.ListenAndServe(":"+*port, nil)
 }
 
-func getRandomImages(dir string, count int) ([]string, error) {
-	files, err := os.ReadDir(dir)
+func getRandomImages(imgDir string, count int) ([]ImageData, error) {
+	files, err := ioutil.ReadDir(imgDir)
 	if err != nil {
 		return nil, err
 	}
 
-	var images []string
-	for _, file := range files {
+	rand.Seed(time.Now().UnixNano())
+	rand.Shuffle(len(files), func(i, j int) { files[i], files[j] = files[j], files[i] })
+
+	var images []ImageData
+	for i := 0; i < count && i < len(files); i++ {
+		file := files[i]
 		if !file.IsDir() {
-			ext := filepath.Ext(file.Name())
-			if ext == ".jpg" || ext == ".jpeg" || ext == ".png" {
-				imgPath := filepath.Join(dir, file.Name())
-				imgBase64, err := encodeImageToBase64(imgPath)
-				if err != nil {
-					return nil, err
-				}
-				images = append(images, imgBase64)
+			imgPath := filepath.Join(imgDir, file.Name())
+			imgBytes, err := ioutil.ReadFile(imgPath)
+			if err != nil {
+				return nil, err
 			}
+			imgBase64 := base64.StdEncoding.EncodeToString(imgBytes)
+			images = append(images, ImageData{
+				Image:    imgBase64,
+				Filename: file.Name(),
+			})
 		}
 	}
 
-	rand.Seed(time.Now().UnixNano())
-	rand.Shuffle(len(images), func(i, j int) { images[i], images[j] = images[j], images[i] })
-
-	if len(images) < count {
-		return images, nil
-	}
-	return images[:count], nil
-}
-
-func encodeImageToBase64(path string) (string, error) {
-	file, err := ioutil.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
-	return base64.StdEncoding.EncodeToString(file), nil
+	return images, nil
 }
