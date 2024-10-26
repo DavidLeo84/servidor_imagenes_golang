@@ -3,8 +3,10 @@ package main
 import (
 	"encoding/base64"
 	"flag"
+	"fmt"
 	"html/template"
 	"io/ioutil"
+	"log"
 	"math/rand"
 	"net/http"
 	"os"
@@ -39,6 +41,11 @@ func main() {
 		imgDir = *imgDir2
 	}
 
+	// Verificar que el directorio exista
+	if _, err := os.Stat(imgDir); os.IsNotExist(err) {
+		log.Fatalf("El directorio %s no existe", imgDir)
+	}
+
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		images, err := getRandomImages(imgDir, 4)
 		if err != nil {
@@ -53,12 +60,10 @@ func main() {
             <meta charset="UTF-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <title>Galería de Imágenes</title>
-            <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
             <style>
                 body {
-                    background: #4AC29A;  /* fallback for old browsers */
-                    background: -webkit-linear-gradient(to right, #BDFFF3, #4AC29A);  /* Chrome 10-25, Safari 5.1-6 */
-                    background: rgb(2,0,36);
+                    background: #4AC29A;
+                    background: -webkit-linear-gradient(to right, #BDFFF3, #4AC29A);
                     background: linear-gradient(90deg, rgba(2,0,36,1) 0%, rgba(96,9,121,1) 18%, rgba(0,212,255,1) 100%);
                 }
                 .modal {
@@ -93,35 +98,48 @@ func main() {
                     text-decoration: none;
                     cursor: pointer;
                 }
+                .container {
+                    display: flex;
+                    flex-wrap: wrap;
+                    justify-content: center;
+                }
+                .image-box {
+                    flex: 1 1 45%;
+                    margin: 10px;
+                    text-align: center;
+                }
+                .image-box img {
+                    width: 100%;
+                    height: auto;
+                    max-width: 400px;
+                    max-height: 400px;
+                }
             </style>
         </head>
         <body>
             <div class="container text-center">
                 <h1 class="my-4">Galería de Imágenes</h1>
-                <div class="row">
+                <div class="container">
                     {{range .Images}}
-                    <div class="col-lg-6 col-md-6 mb-4">
-                        <img class="img-fluid" style="width: 400px; height: 400px;" src="data:image;base64,{{.Image}}" alt="Imagen" onclick="openModal(this.src)">
+                    <div class="image-box">
+                        <img class="img-fluid" src="data:image;base64,{{.Image}}" alt="Imagen" onclick="openModal(this.src)">
                         <p>{{.Filename}}</p>
                     </div>
                     {{end}}
                 </div>
                 <p>Servidor host: {{.Hostname}}</p>
             </div>
-
             <div id="myModal" class="modal">
                 <div class="modal-content">
                     <span class="close" onclick="closeModal()">×</span>
                     <img id="modalImage" style="width: 500px; height: 500px;" src="" alt="Imagen">
                 </div>
             </div>
-
             <script>
                 function openModal(src) {
                     document.getElementById("modalImage").src = src;
                     document.getElementById("myModal").style.display = "block";
                 }
-
                 function closeModal() {
                     document.getElementById("myModal").style.display = "none";
                 }
@@ -134,22 +152,20 @@ func main() {
 			Images:   images,
 			Hostname: hostname,
 		}
-
 		tmpl.Execute(w, pageData)
 	})
 
+	log.Printf("Servidor iniciado en el puerto %s", *port)
 	http.ListenAndServe(":"+*port, nil)
 }
 
 func getRandomImages(imgDir string, count int) ([]ImageData, error) {
 	files, err := ioutil.ReadDir(imgDir)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("Error al abrir el directorio: %v", err)
 	}
-
 	rand.Seed(time.Now().UnixNano())
 	rand.Shuffle(len(files), func(i, j int) { files[i], files[j] = files[j], files[i] })
-
 	var images []ImageData
 	for i := 0; i < count && i < len(files); i++ {
 		file := files[i]
@@ -157,7 +173,7 @@ func getRandomImages(imgDir string, count int) ([]ImageData, error) {
 			imgPath := filepath.Join(imgDir, file.Name())
 			imgBytes, err := ioutil.ReadFile(imgPath)
 			if err != nil {
-				return nil, err
+				return nil, fmt.Errorf("Error al leer el archivo %s: %v", imgPath, err)
 			}
 			imgBase64 := base64.StdEncoding.EncodeToString(imgBytes)
 			images = append(images, ImageData{
@@ -166,6 +182,5 @@ func getRandomImages(imgDir string, count int) ([]ImageData, error) {
 			})
 		}
 	}
-
 	return images, nil
 }
